@@ -1,0 +1,141 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nomad Comfort Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #toolbar { padding: 10px; background: #f7f7f7; border-bottom: 1px solid #e2e2e2; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    #map { height: calc(100% - 64px); width: 100%; }
+    .pill { padding: 6px 10px; border: 1px solid #ddd; border-radius: 10px; background: #fff; }
+    label { font-size: 14px; color: #333; }
+    select, input { padding: 6px; }
+    #status { margin-left: auto; font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <div class="pill">
+      <label for="month">Month:</label>
+      <select id="month">
+        <option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option><option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option><option value="Jul">Jul</option><option value="Aug">Aug</option><option value="Sep">Sep</option><option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option>
+      </select>
+    </div>
+    <div class="pill">
+      <label for="minTemp">Min °F:</label>
+      <input id="minTemp" type="number" value="50" step="1" />
+    </div>
+    <div class="pill">
+      <label for="maxTemp">Max °F:</label>
+      <input id="maxTemp" type="number" value="75" step="1" />
+    </div>
+    <div class="pill">
+      <label for="maxPrcp">Max monthly precip (in):</label>
+      <input id="maxPrcp" type="number" value="5" step="0.1" />
+    </div>
+    <div class="pill">
+      <input id="file" type="file" accept=".json" />
+      <label for="file">Load dataset (.json)</label>
+    </div>
+    <div id="status">Using demo dataset. Drop your dataset JSON to replace.</div>
+  </div>
+
+  <div id="map"></div>
+
+  <script>
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let cityData = null;
+    let markers = [];
+
+    // Map
+    const map = L.map('map').setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    function clearMarkers() {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+    }
+
+    function update() {
+      if (!cityData) return;
+      const m = document.getElementById('month').value;
+      const tmin = parseFloat(document.getElementById('minTemp').value);
+      const tmax = parseFloat(document.getElementById('maxTemp').value);
+      const maxP = parseFloat(document.getElementById('maxPrcp').value);
+
+      clearMarkers();
+      cityData.forEach(c => {
+        const t = c.tavg_f[m];
+        const p = c.prcp_in ? c.prcp_in[m] : null;
+        if (t == null) return;
+        const tempOk = (t >= tmin && t <= tmax);
+        const prcpOk = (p == null) ? true : (p <= maxP);
+        if (tempOk && prcpOk) {
+          const marker = L.marker([c.lat, c.lon]).addTo(map);
+          const details = `
+            <b>${c.city}, ${c.country}</b><br>
+            <b>${m}</b><br>
+            Avg: ${t} °F<br>
+            Min/Max: ${(c.tmin_f && c.tmin_f[m]) ?? "n/a"} / ${(c.tmax_f && c.tmax_f[m]) ?? "n/a"} °F<br>
+            Precip: ${(p ?? "n/a")} in
+          `;
+          marker.bindPopup(details);
+          markers.push(marker);
+        }
+      });
+    }
+
+    // Load external dataset if present
+    async function tryLoadExternalJson() {
+      try {
+        const res = await fetch('./data/dataset_monthly_normals.json');
+        if (res.ok) {
+          cityData = await res.json();
+          document.getElementById('status').textContent = "Loaded dataset_monthly_normals.json";
+          update();
+          return;
+        }
+      } catch (e) { /* ignore */ }
+      // Fallback to demo
+      const demo = await fetch('./data/demo_dataset.json').then(r => r.json());
+      cityData = demo;
+      document.getElementById('status').textContent = "Using demo dataset. Drop your dataset JSON to replace.";
+      update();
+    }
+
+    // Handle upload
+    document.getElementById('file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) {
+          cityData = data;
+          document.getElementById('status').textContent = `Loaded ${file.name} (${data.length} cities)`;
+          update();
+        } else {
+          alert("Invalid JSON: expected an array of city objects");
+        }
+      } catch (err) {
+        alert("Failed to parse JSON file");
+      }
+    });
+
+    // UI events
+    document.getElementById('month').addEventListener('change', update);
+    document.getElementById('minTemp').addEventListener('input', update);
+    document.getElementById('maxTemp').addEventListener('input', update);
+    document.getElementById('maxPrcp').addEventListener('input', update);
+
+    // Initialize
+    tryLoadExternalJson();
+  </script>
+</body>
+</html>
